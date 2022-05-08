@@ -10,6 +10,7 @@ import (
 	"github.com/vercel/turborepo/cli/internal/cmd/auth"
 	"github.com/vercel/turborepo/cli/internal/cmd/info"
 	"github.com/vercel/turborepo/cli/internal/config"
+	"github.com/vercel/turborepo/cli/internal/daemon"
 	"github.com/vercel/turborepo/cli/internal/login"
 	"github.com/vercel/turborepo/cli/internal/process"
 	prune "github.com/vercel/turborepo/cli/internal/prune"
@@ -99,6 +100,9 @@ func main() {
 		},
 		"bin": func() (cli.Command, error) {
 			return &info.BinCommand{Config: cf, UI: ui}, nil
+		},
+		"daemon": func() (cli.Command, error) {
+			return &daemon.Command{Config: cf, UI: ui}, nil
 		},
 	}
 

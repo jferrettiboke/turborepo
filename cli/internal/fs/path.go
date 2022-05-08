@@ -143,3 +143,7 @@ func ReadFile(fs afero.Fs, filename AbsolutePath) ([]byte, error) {
 func RemoveFile(fs afero.Fs, filename AbsolutePath) error {
 	return fs.Remove(filename.asString())
 }
+
+func GetTempDir(fs afero.Fs, subDir string) AbsolutePath {
+	return AbsolutePath(afero.GetTempDir(fs, subDir))
+}

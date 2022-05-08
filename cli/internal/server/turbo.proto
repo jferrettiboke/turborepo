@@ -1,0 +1,32 @@
+syntax = "proto3";
+
+option go_package = "github.com/vercel/turborepo/cli/internal/server/server";
+
+package server;
+
+service Turbo {
+  rpc Ping (PingRequest) returns (PingReply) {}
+
+  // Implement cache watching
+  rpc NotifyDirectoriesBuilt (NotifyDirectioresBuiltRequest) returns (NotifyDirectoriesBuiltReply) {}
+  rpc ShouldRestoreDirectory (ShouldRestoreDirectoryRequest) returns (ShouldRestoreDirectoryReply) {}
+}
+
+message PingRequest {}
+message PingReply {}
+
+message NotifyDirectioresBuiltRequest {
+  repeated string directory = 1;
+  string hash = 2;
+}
+
+message NotifyDirectoriesBuiltReply {}
+
+message ShouldRestoreDirectoryRequest {
+  string directory = 1;
+  string hash = 2;
+}
+
+message ShouldRestoreDirectoryReply {
+  repeated string okToRestore = 1;
+}

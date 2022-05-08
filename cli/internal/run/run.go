@@ -22,6 +22,7 @@ import (
 	"github.com/vercel/turborepo/cli/internal/config"
 	"github.com/vercel/turborepo/cli/internal/context"
 	"github.com/vercel/turborepo/cli/internal/core"
+	"github.com/vercel/turborepo/cli/internal/daemon"
 	"github.com/vercel/turborepo/cli/internal/fs"
 	"github.com/vercel/turborepo/cli/internal/logstreamer"
 	"github.com/vercel/turborepo/cli/internal/nodes"
@@ -169,6 +170,13 @@ func (c *RunCommand) Run(args []string) int {
 		c.logError(c.Config.Logger, "", err)
 		return 1
 	}
+	turbodClient, err := daemon.RunClient(c.Config)
+	if err != nil {
+		c.logError(c.Config.Logger, "", err)
+		// TODO(gsoltis): need a fallback
+		return 1
+	}
+	fmt.Printf("got client %v\n", turbodClient)
 
 	ctx, err := context.New(context.WithGraph(runOptions.cwd, c.Config, runOptions.cacheOpts.Dir))
 	if err != nil {
@@ -579,6 +587,9 @@ func parseRunArgs(args []string, config *config.Config, output cli.Ui) (*RunOpti
 			case strings.HasPrefix(arg, "--heap"):
 			case strings.HasPrefix(arg, "--no-gc"):
 			case strings.HasPrefix(arg, "--cwd="):
+			case arg == "-v":
+			case arg == "-vv":
+			case arg == "-vvv":
 			default:
 				return nil, errors.New(fmt.Sprintf("unknown flag: %v", arg))
 			}
