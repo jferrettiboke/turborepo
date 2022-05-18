@@ -23,7 +23,9 @@ const _ = grpc.SupportPackageIsVersion7
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type TurboClient interface {
 	Ping(ctx context.Context, in *PingRequest, opts ...grpc.CallOption) (*PingReply, error)
-	GetGlobalHash(ctx context.Context, in *GlobalHashRequest, opts ...grpc.CallOption) (*GlobalHashReply, error)
+	// Implement cache watching
+	NotifyDirectoriesBuilt(ctx context.Context, in *NotifyDirectioresBuiltRequest, opts ...grpc.CallOption) (*NotifyDirectoriesBuiltReply, error)
+	ShouldRestoreDirectory(ctx context.Context, in *ShouldRestoreDirectoryRequest, opts ...grpc.CallOption) (*ShouldRestoreDirectoryReply, error)
 }
 
 type turboClient struct {
@@ -43,9 +45,18 @@ func (c *turboClient) Ping(ctx context.Context, in *PingRequest, opts ...grpc.Ca
 	return out, nil
 }
 
-func (c *turboClient) GetGlobalHash(ctx context.Context, in *GlobalHashRequest, opts ...grpc.CallOption) (*GlobalHashReply, error) {
-	out := new(GlobalHashReply)
-	err := c.cc.Invoke(ctx, "/server.Turbo/GetGlobalHash", in, out, opts...)
+func (c *turboClient) NotifyDirectoriesBuilt(ctx context.Context, in *NotifyDirectioresBuiltRequest, opts ...grpc.CallOption) (*NotifyDirectoriesBuiltReply, error) {
+	out := new(NotifyDirectoriesBuiltReply)
+	err := c.cc.Invoke(ctx, "/server.Turbo/NotifyDirectoriesBuilt", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *turboClient) ShouldRestoreDirectory(ctx context.Context, in *ShouldRestoreDirectoryRequest, opts ...grpc.CallOption) (*ShouldRestoreDirectoryReply, error) {
+	out := new(ShouldRestoreDirectoryReply)
+	err := c.cc.Invoke(ctx, "/server.Turbo/ShouldRestoreDirectory", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -57,7 +68,9 @@ func (c *turboClient) GetGlobalHash(ctx context.Context, in *GlobalHashRequest, 
 // for forward compatibility
 type TurboServer interface {
 	Ping(context.Context, *PingRequest) (*PingReply, error)
-	GetGlobalHash(context.Context, *GlobalHashRequest) (*GlobalHashReply, error)
+	// Implement cache watching
+	NotifyDirectoriesBuilt(context.Context, *NotifyDirectioresBuiltRequest) (*NotifyDirectoriesBuiltReply, error)
+	ShouldRestoreDirectory(context.Context, *ShouldRestoreDirectoryRequest) (*ShouldRestoreDirectoryReply, error)
 	mustEmbedUnimplementedTurboServer()
 }
 
@@ -68,8 +81,11 @@ type UnimplementedTurboServer struct {
 func (UnimplementedTurboServer) Ping(context.Context, *PingRequest) (*PingReply, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Ping not implemented")
 }
-func (UnimplementedTurboServer) GetGlobalHash(context.Context, *GlobalHashRequest) (*GlobalHashReply, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method GetGlobalHash not implemented")
+func (UnimplementedTurboServer) NotifyDirectoriesBuilt(context.Context, *NotifyDirectioresBuiltRequest) (*NotifyDirectoriesBuiltReply, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method NotifyDirectoriesBuilt not implemented")
+}
+func (UnimplementedTurboServer) ShouldRestoreDirectory(context.Context, *ShouldRestoreDirectoryRequest) (*ShouldRestoreDirectoryReply, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ShouldRestoreDirectory not implemented")
 }
 func (UnimplementedTurboServer) mustEmbedUnimplementedTurboServer() {}
 
@@ -102,20 +118,38 @@ func _Turbo_Ping_Handler(srv interface{}, ctx context.Context, dec func(interfac
 	return interceptor(ctx, in, info, handler)
 }
 
-func _Turbo_GetGlobalHash_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(GlobalHashRequest)
+func _Turbo_NotifyDirectoriesBuilt_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(NotifyDirectioresBuiltRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(TurboServer).GetGlobalHash(ctx, in)
+		return srv.(TurboServer).NotifyDirectoriesBuilt(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: "/server.Turbo/GetGlobalHash",
+		FullMethod: "/server.Turbo/NotifyDirectoriesBuilt",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(TurboServer).GetGlobalHash(ctx, req.(*GlobalHashRequest))
+		return srv.(TurboServer).NotifyDirectoriesBuilt(ctx, req.(*NotifyDirectioresBuiltRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Turbo_ShouldRestoreDirectory_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ShouldRestoreDirectoryRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TurboServer).ShouldRestoreDirectory(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/server.Turbo/ShouldRestoreDirectory",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TurboServer).ShouldRestoreDirectory(ctx, req.(*ShouldRestoreDirectoryRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -132,8 +166,12 @@ var Turbo_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _Turbo_Ping_Handler,
 		},
 		{
-			MethodName: "GetGlobalHash",
-			Handler:    _Turbo_GetGlobalHash_Handler,
+			MethodName: "NotifyDirectoriesBuilt",
+			Handler:    _Turbo_NotifyDirectoriesBuilt_Handler,
+		},
+		{
+			MethodName: "ShouldRestoreDirectory",
+			Handler:    _Turbo_ShouldRestoreDirectory_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

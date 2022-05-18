@@ -23,6 +23,7 @@ import (
 	"github.com/vercel/turborepo/cli/internal/context"
 	"github.com/vercel/turborepo/cli/internal/core"
 	"github.com/vercel/turborepo/cli/internal/daemon"
+	"github.com/vercel/turborepo/cli/internal/daemonclient"
 	"github.com/vercel/turborepo/cli/internal/fs"
 	"github.com/vercel/turborepo/cli/internal/logstreamer"
 	"github.com/vercel/turborepo/cli/internal/nodes"
@@ -49,6 +50,7 @@ type RunCommand struct {
 	Config    *config.Config
 	Ui        *cli.ColoredUi
 	Processes *process.Manager
+	Ctx       gocontext.Context
 }
 
 // completeGraph represents the common state inferred from the filesystem and pipeline.
@@ -170,13 +172,15 @@ func (c *RunCommand) Run(args []string) int {
 		c.logError(c.Config.Logger, "", err)
 		return 1
 	}
-	turbodClient, err := daemon.RunClient(c.Config)
+	turbodClient, err := daemon.RunClient(c.Config.Cwd, c.Config.Logger, daemon.ClientOpts{})
 	if err != nil {
-		c.logError(c.Config.Logger, "", err)
-		// TODO(gsoltis): need a fallback
-		return 1
+		c.logWarning(c.Config.Logger, "", errors.Wrap(err, "failed to contact turbod. Continuing in standalone mode"))
+	} else {
+		defer func() { _ = turbodClient.Close() }()
+		c.Config.Logger.Debug("running in daemon mode")
+		daemonClient := daemonclient.New(c.Ctx, turbodClient)
+		runOptions.runcacheOpts.OutputWatcher = daemonClient
 	}
-	fmt.Printf("got client %v\n", turbodClient)
 
 	ctx, err := context.New(context.WithGraph(runOptions.cwd, c.Config, runOptions.cacheOpts.Dir))
 	if err != nil {
@@ -635,14 +639,13 @@ func hasGraphViz() bool {
 }
 
 func (c *RunCommand) executeTasks(g *completeGraph, rs *runSpec, engine *core.Scheduler, packageManager *packagemanager.PackageManager, hashes *taskhash.Tracker, startAt time.Time) int {
-	goctx := gocontext.Background()
 	var analyticsSink analytics.Sink
 	if c.Config.IsLoggedIn() {
 		analyticsSink = c.Config.ApiClient
 	} else {
 		analyticsSink = analytics.NullSink
 	}
-	analyticsClient := analytics.NewClient(goctx, analyticsSink, c.Config.Logger.Named("analytics"))
+	analyticsClient := analytics.NewClient(c.Ctx, analyticsSink, c.Config.Logger.Named("analytics"))
 	defer analyticsClient.CloseWithTimeout(50 * time.Millisecond)
 	// Theoretically this is overkill, but bias towards not spamming the console
 	once := &sync.Once{}

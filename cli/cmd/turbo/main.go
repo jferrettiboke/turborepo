@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"runtime/debug"
@@ -51,6 +52,7 @@ func main() {
 		}
 	}
 	args = args[:argsEnd]
+	ctx := context.Background()
 
 	ui := ui.BuildColoredUi(colorMode)
 	c := cli.NewCLI("turbo", turboVersion)
@@ -80,7 +82,7 @@ func main() {
 	c.HiddenCommands = []string{"graph"}
 	c.Commands = map[string]cli.CommandFactory{
 		"run": func() (cli.Command, error) {
-			return &run.RunCommand{Config: cf, Ui: ui, Processes: processes},
+			return &run.RunCommand{Config: cf, Ui: ui, Processes: processes, Ctx: ctx},
 				nil
 		},
 		"prune": func() (cli.Command, error) {

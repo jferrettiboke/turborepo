@@ -14,7 +14,6 @@ import (
 	"github.com/hashicorp/go-hclog"
 	"github.com/mitchellh/cli"
 	"github.com/pkg/errors"
-	"github.com/spf13/afero"
 	"github.com/spf13/cobra"
 	"github.com/vercel/turborepo/cli/internal/config"
 	"github.com/vercel/turborepo/cli/internal/fs"
@@ -56,7 +55,6 @@ func (c *Command) Synopsis() string {
 type daemon struct {
 	ui         cli.Ui
 	logger     hclog.Logger
-	fsys       afero.Fs
 	repoRoot   fs.AbsolutePath
 	timeout    time.Duration
 	reqCh      chan struct{}
@@ -65,8 +63,8 @@ type daemon struct {
 	cancel     context.CancelFunc
 }
 
-func getDaemonFileRoot(fsys afero.Fs, repoRoot fs.AbsolutePath) fs.AbsolutePath {
-	tempDir := fs.GetTempDir(fsys, "turbod")
+func getDaemonFileRoot(repoRoot fs.AbsolutePath) fs.AbsolutePath {
+	tempDir := fs.GetTempDir("turbod")
 
 	pathHash := sha256.Sum256([]byte(repoRoot.ToString()))
 	// We grab a substring of the hash because there is a 108-character limit on the length
@@ -75,8 +73,8 @@ func getDaemonFileRoot(fsys afero.Fs, repoRoot fs.AbsolutePath) fs.AbsolutePath 
 	return tempDir.Join(hexHash)
 }
 
-func getUnixSocket(fsys afero.Fs, repoRoot fs.AbsolutePath) fs.AbsolutePath {
-	root := getDaemonFileRoot(fsys, repoRoot)
+func getUnixSocket(repoRoot fs.AbsolutePath) fs.AbsolutePath {
+	root := getDaemonFileRoot(repoRoot)
 	return root.Join("turbod.sock")
 }
 
@@ -96,9 +94,13 @@ func getCmd(config *config.Config, ui cli.Ui) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx, cancel := context.WithCancel(context.Background())
 			d := &daemon{
-				ui:         ui,
-				logger:     config.Logger,
-				fsys:       config.Fs,
+				ui: ui,
+				logger: hclog.New(&hclog.LoggerOptions{
+					Output: os.Stdout,
+					Level:  hclog.Debug,
+					Color:  hclog.AutoColor,
+					Name:   "turbod",
+				}),
 				repoRoot:   config.Cwd,
 				timeout:    idleTimeout,
 				reqCh:      make(chan struct{}),
@@ -133,9 +135,13 @@ func (d *daemon) debounceServers(sockPath fs.AbsolutePath) error {
 func (d *daemon) runTurboServer() error {
 	defer d.cancel()
 
-	sockPath := getUnixSocket(d.fsys, d.repoRoot)
-	d.logger.Debug("Using socket path %v (%v)\n", sockPath, len(sockPath))
+	sockPath := getUnixSocket(d.repoRoot)
+	d.logger.Debug(fmt.Sprintf("Using socket path %v (%v)\n", sockPath, len(sockPath)))
 	err := d.debounceServers(sockPath)
+	if err != nil {
+		return err
+	}
+	err = sockPath.EnsureDir()
 	if err != nil {
 		return err
 	}
@@ -191,10 +197,21 @@ func (d *daemon) timeoutLoop() {
 	}
 }
 
-func RunClient(config *config.Config) (server.TurboClient, error) {
+type ClientOpts struct{}
+
+type Client struct {
+	server.TurboClient
+	conn *grpc.ClientConn
+}
+
+func (c *Client) Close() error {
+	return c.conn.Close()
+}
+
+func RunClient(repoRoot fs.AbsolutePath, logger hclog.Logger, opts ClientOpts) (*Client, error) {
 	creds := insecure.NewCredentials()
 
-	sockPath, err := getOrStartServer(config)
+	sockPath, err := getOrStartServer(repoRoot, logger, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -203,32 +220,25 @@ func RunClient(config *config.Config) (server.TurboClient, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = conn.Close() }()
-	state := conn.GetState()
-	fmt.Printf("state: %v\n", state)
 	c := server.NewTurboClient(conn)
-	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Hour)
-	defer cancel()
-	// TODO(gsoltis): version check goes here?
-	_, err = c.Ping(ctx, &server.PingRequest{})
-	if err != nil {
-		return nil, err
-	}
-	return c, nil
+	return &Client{
+		TurboClient: c,
+		conn:        conn,
+	}, nil
 }
 
 // getOrStartServer looks for an existing socket file, and starts a server if it can't find one
-func getOrStartServer(config *config.Config) (fs.AbsolutePath, error) {
-	sockPath := getUnixSocket(config.Fs, config.Cwd)
+func getOrStartServer(repoRoot fs.AbsolutePath, logger hclog.Logger, opts ClientOpts) (fs.AbsolutePath, error) {
+	sockPath := getUnixSocket(repoRoot)
 	if sockPath.FileExists() {
-		config.Logger.Debug(fmt.Sprintf("found existing turbod socket at %v\n", sockPath))
+		logger.Debug(fmt.Sprintf("found existing turbod socket at %v", sockPath))
 		return sockPath, nil
 	}
 	bin, err := os.Executable()
 	if err != nil {
 		return "", err
 	}
-	config.Logger.Debug(fmt.Sprintf("starting turbod binary %v\n", bin))
+	logger.Debug(fmt.Sprintf("starting turbod binary %v", bin))
 	cmd := exec.Command(bin, "daemon", "--idle-time=15s")
 	err = cmd.Start()
 	if err != nil {
