@@ -24,8 +24,8 @@ const _ = grpc.SupportPackageIsVersion7
 type TurboClient interface {
 	Ping(ctx context.Context, in *PingRequest, opts ...grpc.CallOption) (*PingReply, error)
 	// Implement cache watching
-	NotifyDirectoriesBuilt(ctx context.Context, in *NotifyDirectioresBuiltRequest, opts ...grpc.CallOption) (*NotifyDirectoriesBuiltReply, error)
-	ShouldRestoreDirectory(ctx context.Context, in *ShouldRestoreDirectoryRequest, opts ...grpc.CallOption) (*ShouldRestoreDirectoryReply, error)
+	NotifyOutputsWritten(ctx context.Context, in *NotifyOutputsWrittenRequest, opts ...grpc.CallOption) (*NotifyOutputsWrittenResponse, error)
+	GetChangedOutputs(ctx context.Context, in *GetChangedOutputsRequest, opts ...grpc.CallOption) (*GetChangedOutputsResponse, error)
 }
 
 type turboClient struct {
@@ -45,18 +45,18 @@ func (c *turboClient) Ping(ctx context.Context, in *PingRequest, opts ...grpc.Ca
 	return out, nil
 }
 
-func (c *turboClient) NotifyDirectoriesBuilt(ctx context.Context, in *NotifyDirectioresBuiltRequest, opts ...grpc.CallOption) (*NotifyDirectoriesBuiltReply, error) {
-	out := new(NotifyDirectoriesBuiltReply)
-	err := c.cc.Invoke(ctx, "/server.Turbo/NotifyDirectoriesBuilt", in, out, opts...)
+func (c *turboClient) NotifyOutputsWritten(ctx context.Context, in *NotifyOutputsWrittenRequest, opts ...grpc.CallOption) (*NotifyOutputsWrittenResponse, error) {
+	out := new(NotifyOutputsWrittenResponse)
+	err := c.cc.Invoke(ctx, "/server.Turbo/NotifyOutputsWritten", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func (c *turboClient) ShouldRestoreDirectory(ctx context.Context, in *ShouldRestoreDirectoryRequest, opts ...grpc.CallOption) (*ShouldRestoreDirectoryReply, error) {
-	out := new(ShouldRestoreDirectoryReply)
-	err := c.cc.Invoke(ctx, "/server.Turbo/ShouldRestoreDirectory", in, out, opts...)
+func (c *turboClient) GetChangedOutputs(ctx context.Context, in *GetChangedOutputsRequest, opts ...grpc.CallOption) (*GetChangedOutputsResponse, error) {
+	out := new(GetChangedOutputsResponse)
+	err := c.cc.Invoke(ctx, "/server.Turbo/GetChangedOutputs", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -69,8 +69,8 @@ func (c *turboClient) ShouldRestoreDirectory(ctx context.Context, in *ShouldRest
 type TurboServer interface {
 	Ping(context.Context, *PingRequest) (*PingReply, error)
 	// Implement cache watching
-	NotifyDirectoriesBuilt(context.Context, *NotifyDirectioresBuiltRequest) (*NotifyDirectoriesBuiltReply, error)
-	ShouldRestoreDirectory(context.Context, *ShouldRestoreDirectoryRequest) (*ShouldRestoreDirectoryReply, error)
+	NotifyOutputsWritten(context.Context, *NotifyOutputsWrittenRequest) (*NotifyOutputsWrittenResponse, error)
+	GetChangedOutputs(context.Context, *GetChangedOutputsRequest) (*GetChangedOutputsResponse, error)
 	mustEmbedUnimplementedTurboServer()
 }
 
@@ -81,11 +81,11 @@ type UnimplementedTurboServer struct {
 func (UnimplementedTurboServer) Ping(context.Context, *PingRequest) (*PingReply, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Ping not implemented")
 }
-func (UnimplementedTurboServer) NotifyDirectoriesBuilt(context.Context, *NotifyDirectioresBuiltRequest) (*NotifyDirectoriesBuiltReply, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method NotifyDirectoriesBuilt not implemented")
+func (UnimplementedTurboServer) NotifyOutputsWritten(context.Context, *NotifyOutputsWrittenRequest) (*NotifyOutputsWrittenResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method NotifyOutputsWritten not implemented")
 }
-func (UnimplementedTurboServer) ShouldRestoreDirectory(context.Context, *ShouldRestoreDirectoryRequest) (*ShouldRestoreDirectoryReply, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method ShouldRestoreDirectory not implemented")
+func (UnimplementedTurboServer) GetChangedOutputs(context.Context, *GetChangedOutputsRequest) (*GetChangedOutputsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetChangedOutputs not implemented")
 }
 func (UnimplementedTurboServer) mustEmbedUnimplementedTurboServer() {}
 
@@ -118,38 +118,38 @@ func _Turbo_Ping_Handler(srv interface{}, ctx context.Context, dec func(interfac
 	return interceptor(ctx, in, info, handler)
 }
 
-func _Turbo_NotifyDirectoriesBuilt_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(NotifyDirectioresBuiltRequest)
+func _Turbo_NotifyOutputsWritten_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(NotifyOutputsWrittenRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(TurboServer).NotifyDirectoriesBuilt(ctx, in)
+		return srv.(TurboServer).NotifyOutputsWritten(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: "/server.Turbo/NotifyDirectoriesBuilt",
+		FullMethod: "/server.Turbo/NotifyOutputsWritten",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(TurboServer).NotifyDirectoriesBuilt(ctx, req.(*NotifyDirectioresBuiltRequest))
+		return srv.(TurboServer).NotifyOutputsWritten(ctx, req.(*NotifyOutputsWrittenRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-func _Turbo_ShouldRestoreDirectory_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(ShouldRestoreDirectoryRequest)
+func _Turbo_GetChangedOutputs_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetChangedOutputsRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(TurboServer).ShouldRestoreDirectory(ctx, in)
+		return srv.(TurboServer).GetChangedOutputs(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: "/server.Turbo/ShouldRestoreDirectory",
+		FullMethod: "/server.Turbo/GetChangedOutputs",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(TurboServer).ShouldRestoreDirectory(ctx, req.(*ShouldRestoreDirectoryRequest))
+		return srv.(TurboServer).GetChangedOutputs(ctx, req.(*GetChangedOutputsRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -166,12 +166,12 @@ var Turbo_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _Turbo_Ping_Handler,
 		},
 		{
-			MethodName: "NotifyDirectoriesBuilt",
-			Handler:    _Turbo_NotifyDirectoriesBuilt_Handler,
+			MethodName: "NotifyOutputsWritten",
+			Handler:    _Turbo_NotifyOutputsWritten_Handler,
 		},
 		{
-			MethodName: "ShouldRestoreDirectory",
-			Handler:    _Turbo_ShouldRestoreDirectory_Handler,
+			MethodName: "GetChangedOutputs",
+			Handler:    _Turbo_GetChangedOutputs_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

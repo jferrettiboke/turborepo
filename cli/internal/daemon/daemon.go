@@ -145,14 +145,19 @@ func (d *daemon) runTurboServer() error {
 	if err != nil {
 		return err
 	}
+	turboServer, err := server.New(d.logger, d.repoRoot)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = turboServer.Close() }()
 	lis, err := net.Listen("unix", sockPath.ToString())
 	if err != nil {
 		return err
 	}
-
-	go d.timeoutLoop()
+	// We don't need to explicitly close 'lis', the grpc server will handle that
 	s := grpc.NewServer(grpc.UnaryInterceptor(d.onRequest))
-	turboServer := server.New()
+	go d.timeoutLoop()
+
 	turboServer.Register(s)
 	errCh := make(chan error)
 	go func(errCh chan<- error) {

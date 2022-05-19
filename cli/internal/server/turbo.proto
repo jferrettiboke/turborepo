@@ -8,25 +8,25 @@ service Turbo {
   rpc Ping (PingRequest) returns (PingReply) {}
 
   // Implement cache watching
-  rpc NotifyDirectoriesBuilt (NotifyDirectioresBuiltRequest) returns (NotifyDirectoriesBuiltReply) {}
-  rpc ShouldRestoreDirectory (ShouldRestoreDirectoryRequest) returns (ShouldRestoreDirectoryReply) {}
+  rpc NotifyOutputsWritten (NotifyOutputsWrittenRequest) returns (NotifyOutputsWrittenResponse) {}
+  rpc GetChangedOutputs (GetChangedOutputsRequest) returns (GetChangedOutputsResponse) {}
 }
 
 message PingRequest {}
 message PingReply {}
 
-message NotifyDirectioresBuiltRequest {
-  repeated string directory = 1;
+message NotifyOutputsWrittenRequest {
+  repeated string output_globs = 1;
   string hash = 2;
 }
 
-message NotifyDirectoriesBuiltReply {}
+message NotifyOutputsWrittenResponse {}
 
-message ShouldRestoreDirectoryRequest {
-  string directory = 1;
+message GetChangedOutputsRequest {
+  repeated string output_globs = 1;
   string hash = 2;
 }
 
-message ShouldRestoreDirectoryReply {
-  repeated string okToRestore = 1;
+message GetChangedOutputsResponse {
+  repeated string changed_output_globs = 1;
 }

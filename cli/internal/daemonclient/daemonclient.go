@@ -21,17 +21,21 @@ func New(ctx context.Context, client server.TurboClient) *DaemonClient {
 	}
 }
 
-func (d *DaemonClient) ShouldRestore(hash string, repoRelativeOutputGlobs []string) ([]string, error) {
-	reply, err := d.client.ShouldRestoreDirectory(d.ctx, &server.ShouldRestoreDirectoryRequest{})
+func (d *DaemonClient) GetChangedOutputs(hash string, repoRelativeOutputGlobs []string) ([]string, error) {
+	reply, err := d.client.GetChangedOutputs(d.ctx, &server.GetChangedOutputsRequest{
+		Hash:        hash,
+		OutputGlobs: repoRelativeOutputGlobs,
+	})
 	if err != nil {
 		return nil, err
 	}
-	return reply.OkToRestore, nil
+	return reply.ChangedOutputGlobs, nil
 }
 
-func (d *DaemonClient) MarkSaved(hash string, repoRelativeOutputGlobs []string) error {
-	_, err := d.client.NotifyDirectoriesBuilt(d.ctx, &server.NotifyDirectioresBuiltRequest{
-		Directory: repoRelativeOutputGlobs,
+func (d *DaemonClient) NotifyOutputsWritten(hash string, repoRelativeOutputGlobs []string) error {
+	_, err := d.client.NotifyOutputsWritten(d.ctx, &server.NotifyOutputsWrittenRequest{
+		Hash:        hash,
+		OutputGlobs: repoRelativeOutputGlobs,
 	})
 	return err
 }
