@@ -124,11 +124,33 @@ func (g *GlobWatcher) GetChangedGlobs(hash string) ([]string, error) {
 }
 
 func (g *GlobWatcher) OnFileWatchEvent(ev fsnotify.Event) {
-	panic("not yet implemented")
+	// At this point, we don't care what the Op is, any Op represents a change
+	// that should invalidate matching globs
+	g.logger.Debug(fmt.Sprintf("Got fsnotify event %v", ev))
+	absolutePath := ev.Name
+	repoRelativePath, err := g.repoRoot.RelativePathString(absolutePath)
+	if err != nil {
+		g.logger.Error(fmt.Sprintf("could not get relative path from %v to %v: %v", g.repoRoot, absolutePath, err))
+		return
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	for glob, hashStatus := range g.globStatus {
+		matches, err := doublestar.Match(glob, repoRelativePath)
+		if err != nil {
+			g.logger.Error(fmt.Sprintf("failed to check path %v against glob %v: %v", repoRelativePath, glob, err))
+			continue
+		}
+		if matches {
+			for hash := range hashStatus {
+				hashStatus[hash] = true
+			}
+		}
+	}
 }
 
 func (g *GlobWatcher) OnFileWatchError(err error) {
-	panic("not yet implemented")
+	g.logger.Error(fmt.Sprintf("file watching received an error: %v", err))
 }
 
 // OnFileWatchingClosed implements FileWatchClient.OnFileWatchingClosed
