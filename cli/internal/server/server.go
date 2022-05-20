@@ -2,7 +2,6 @@ package server
 
 import (
 	context "context"
-	"errors"
 	"sync"
 
 	"github.com/fsnotify/fsnotify"
@@ -14,7 +13,7 @@ import (
 
 type Server struct {
 	UnimplementedTurboServer
-	watcher     fileWatcher
+	watcher     *fileWatcher
 	globWatcher *globwatcher.GlobWatcher
 }
 
@@ -86,12 +85,13 @@ func New(logger hclog.Logger, repoRoot fs.AbsolutePath) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
-	globWatcher := globwatcher.New(logger.Named("GlobWatcher"), repoRoot)
+	fileWatcher := &fileWatcher{
+		Watcher: watcher,
+		logger:  logger.Named("FileWatcher"),
+	}
+	globWatcher := globwatcher.New(logger.Named("GlobWatcher"), repoRoot, fileWatcher)
 	server := &Server{
-		watcher: fileWatcher{
-			Watcher: watcher,
-			logger:  logger.Named("FileWatcher"),
-		},
+		watcher:     fileWatcher,
 		globWatcher: globWatcher,
 	}
 	server.watcher.AddClient(globWatcher)
@@ -112,7 +112,7 @@ func (s *Server) Ping(ctx context.Context, req *PingRequest) (*PingReply, error)
 }
 
 func (s *Server) NotifyOutputsWritten(ctx context.Context, req *NotifyOutputsWrittenRequest) (*NotifyOutputsWrittenResponse, error) {
-	err := s.globWatcher.WatchGlobs(&s.watcher, req.Hash, req.OutputGlobs)
+	err := s.globWatcher.WatchGlobs(req.Hash, req.OutputGlobs)
 	if err != nil {
 		return nil, err
 	}
@@ -120,11 +120,8 @@ func (s *Server) NotifyOutputsWritten(ctx context.Context, req *NotifyOutputsWri
 }
 
 func (s *Server) GetChangedOutputs(ctx context.Context, req *GetChangedOutputsRequest) (*GetChangedOutputsResponse, error) {
-	changedGlobs, err := s.globWatcher.GetChangedGlobs(req.Hash)
-	if errors.Is(err, globwatcher.ErrNotTracked) {
-		// If we're not tracking it, mark everything as changed
-		changedGlobs = req.OutputGlobs
-	} else if err != nil {
+	changedGlobs, err := s.globWatcher.GetChangedGlobs(req.Hash, req.OutputGlobs)
+	if err != nil {
 		return nil, err
 	}
 	return &GetChangedOutputsResponse{
