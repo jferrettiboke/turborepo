@@ -10,7 +10,6 @@ import (
 
 	"github.com/fsnotify/fsnotify"
 	"github.com/hashicorp/go-hclog"
-	"github.com/karrick/godirwalk"
 	"github.com/pkg/errors"
 	"github.com/vercel/turborepo/cli/internal/doublestar"
 	"github.com/vercel/turborepo/cli/internal/fs"
@@ -30,42 +29,65 @@ type Server struct {
 	globWatcher *globwatcher.GlobWatcher
 }
 
+// TODO(gsoltis): move this into its own package
 // fileWatcher handles watching all of the files in the monorepo.
 // We currently ignore .git and top-level node_modules. We can revisit
 // if necessary.
 type fileWatcher struct {
 	*fsnotify.Watcher
 
-	logger hclog.Logger
+	logger         hclog.Logger
+	repoRoot       fs.AbsolutePath
+	excludePattern string
 
 	clientsMu sync.RWMutex
 	clients   []FileWatchClient
 	closed    bool
 }
 
+func newFileWatcher(logger hclog.Logger, repoRoot fs.AbsolutePath, watcher *fsnotify.Watcher) *fileWatcher {
+	excludes := make([]string, len(_ignores))
+	for i, ignore := range _ignores {
+		excludes[i] = filepath.FromSlash(repoRoot.Join(ignore).ToString() + "/**")
+	}
+	excludePattern := "{" + strings.Join(excludes, ",") + "}"
+	return &fileWatcher{
+		Watcher:        watcher,
+		logger:         logger,
+		repoRoot:       repoRoot,
+		excludePattern: excludePattern,
+	}
+}
+
 // _ignores is the set of paths we exempt from file-watching
 var _ignores = []string{".git", "node_modules"}
 
 func (fw *fileWatcher) watchRecursively(root fs.AbsolutePath) error {
-	excludes := make([]string, len(_ignores))
-	for i, ignore := range _ignores {
-		excludes[i] = filepath.FromSlash(root.Join(ignore).ToString())
-	}
-	excludePattern := "{" + strings.Join(excludes, ",") + "}"
 	err := fs.WalkMode(root.ToString(), func(name string, isDir bool, info os.FileMode) error {
-		excluded, err := doublestar.Match(excludePattern, filepath.ToSlash(name))
-		if err != nil {
-			return err
-		} else if excluded {
-			return godirwalk.SkipThis
-		}
-
 		if info.IsDir() && (info&os.ModeSymlink == 0) {
 			return fw.Add(name)
 		}
 		return nil
 	})
-	return err
+	if err != nil {
+		return err
+	}
+	if root == fw.repoRoot {
+		// Revoke the ignored directories, which are automatically added
+		// because they are children of watched directories.
+		for _, dir := range fw.WatchList() {
+			excluded, err := doublestar.Match(fw.excludePattern, filepath.ToSlash(dir))
+			if err != nil {
+				return err
+			}
+			if excluded {
+				if err := fw.Remove(dir); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	return nil
 }
 
 func (fw *fileWatcher) onFileAdded(name string) error {
@@ -152,10 +174,7 @@ func New(logger hclog.Logger, repoRoot fs.AbsolutePath) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
-	fileWatcher := &fileWatcher{
-		Watcher: watcher,
-		logger:  logger.Named("FileWatcher"),
-	}
+	fileWatcher := newFileWatcher(logger.Named("FileWatcher"), repoRoot, watcher)
 	globWatcher := globwatcher.New(logger.Named("GlobWatcher"), repoRoot)
 	server := &Server{
 		watcher:     fileWatcher,
