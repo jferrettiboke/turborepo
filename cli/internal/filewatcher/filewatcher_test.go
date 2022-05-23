@@ -1,6 +1,7 @@
-package server
+package filewatcher
 
 import (
+	"sync"
 	"testing"
 	"time"
 
@@ -13,19 +14,19 @@ import (
 )
 
 type testClient struct {
+	mu     sync.Mutex
 	events []fsnotify.Event
-	errors []error
 	notify chan<- struct{}
 }
 
 func (c *testClient) OnFileWatchEvent(ev fsnotify.Event) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	c.events = append(c.events, ev)
 	c.notify <- struct{}{}
 }
 
-func (c *testClient) OnFileWatchError(err error) {
-	c.errors = append(c.errors, err)
-}
+func (c *testClient) OnFileWatchError(err error) {}
 
 func (c *testClient) OnFileWatchClosed() {}
 
@@ -84,8 +85,8 @@ func TestFileWatching(t *testing.T) {
 
 	watcher, err := fsnotify.NewWatcher()
 	assert.NilError(t, err, "NewWatcher")
-	fw := newFileWatcher(logger, repoRoot, watcher)
-	err = fw.watchRecursively(repoRoot)
+	fw := New(logger, repoRoot, watcher)
+	err = fw.Start()
 	assert.NilError(t, err, "watchRecursively")
 	expectedWatching := []string{
 		repoRoot.ToString(),
@@ -112,7 +113,9 @@ func TestFileWatching(t *testing.T) {
 		Op:   fsnotify.Create,
 		Name: fooPath.ToString(),
 	}
+	c.mu.Lock()
 	got := c.events[len(c.events)-1]
+	c.mu.Unlock()
 	assert.DeepEqual(t, got, expectedEvent)
 	expectedWatching = append(expectedWatching, fooPath.ToString())
 	watching = fw.WatchList()
