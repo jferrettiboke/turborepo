@@ -2,10 +2,17 @@ package server
 
 import (
 	context "context"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 
+	"github.com/bmatcuk/doublestar/v4"
 	"github.com/fsnotify/fsnotify"
 	"github.com/hashicorp/go-hclog"
+	"github.com/karrick/godirwalk"
+	"github.com/pkg/errors"
 	"github.com/vercel/turborepo/cli/globwatcher"
 	"github.com/vercel/turborepo/cli/internal/fs"
 	"google.golang.org/grpc"
@@ -27,6 +34,47 @@ type fileWatcher struct {
 	closed    bool
 }
 
+var _ignores = []string{".git", "node_modules"}
+
+func (fw *fileWatcher) watchRecursively(root fs.AbsolutePath) error {
+	excludes := make([]string, len(_ignores))
+	for i, ignore := range _ignores {
+		excludes[i] = filepath.FromSlash(root.Join(ignore).ToString())
+	}
+	excludePattern := "{" + strings.Join(excludes, ",") + "}"
+	err := fs.WalkMode(root.ToString(), func(name string, isDir bool, info os.FileMode) error {
+		excluded, err := doublestar.Match(excludePattern, filepath.ToSlash(name))
+		if err != nil {
+			return err
+		} else if excluded {
+			return godirwalk.SkipThis
+		}
+
+		if info.IsDir() && (info&os.ModeSymlink == 0) {
+			return fw.Add(name)
+		}
+		return nil
+	})
+	return err
+}
+
+func (fw *fileWatcher) onFileAdded(name string) error {
+	info, err := os.Lstat(name)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			// We can race with a file being added and removed. Ignore it
+			return nil
+		}
+		return err
+	}
+	if info.IsDir() {
+		if err := fw.watchRecursively(fs.AbsolutePath(name)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (fw *fileWatcher) watch() {
 outer:
 	for {
@@ -35,6 +83,12 @@ outer:
 			if !ok {
 				fw.logger.Info("Events channel closed. Exiting watch loop")
 				break outer
+			}
+			if ev.Op&fsnotify.Create != 0 {
+				if err := fw.onFileAdded(ev.Name); err != nil {
+					fw.logger.Warn(fmt.Sprintf("failed to handle adding %v: %v", ev.Name, err))
+					continue
+				}
 			}
 			fw.clientsMu.RLock()
 			for _, client := range fw.clients {
@@ -89,12 +143,15 @@ func New(logger hclog.Logger, repoRoot fs.AbsolutePath) (*Server, error) {
 		Watcher: watcher,
 		logger:  logger.Named("FileWatcher"),
 	}
-	globWatcher := globwatcher.New(logger.Named("GlobWatcher"), repoRoot, fileWatcher)
+	globWatcher := globwatcher.New(logger.Named("GlobWatcher"), repoRoot)
 	server := &Server{
 		watcher:     fileWatcher,
 		globWatcher: globWatcher,
 	}
 	server.watcher.AddClient(globWatcher)
+	if err := server.watcher.watchRecursively(repoRoot); err != nil {
+		return nil, errors.Wrapf(err, "watching %v", repoRoot)
+	}
 	go server.watcher.watch()
 	return server, nil
 }
