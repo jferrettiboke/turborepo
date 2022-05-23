@@ -8,22 +8,31 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/bmatcuk/doublestar/v4"
 	"github.com/fsnotify/fsnotify"
 	"github.com/hashicorp/go-hclog"
 	"github.com/karrick/godirwalk"
 	"github.com/pkg/errors"
-	"github.com/vercel/turborepo/cli/globwatcher"
+	"github.com/vercel/turborepo/cli/internal/doublestar"
 	"github.com/vercel/turborepo/cli/internal/fs"
+	"github.com/vercel/turborepo/cli/internal/globwatcher"
 	"google.golang.org/grpc"
 )
 
+// Server implements the GRPC serverside of TurboServer
+// Note for the future: we don't yet make use of turbo.json
+// or the package graph in the server. Once we do, we may need a
+// layer of indirection between "the thing that responds to grpc requests"
+// and "the thing that holds our persistent data structures" to handle
+// changes in the underlying configuration.
 type Server struct {
 	UnimplementedTurboServer
 	watcher     *fileWatcher
 	globWatcher *globwatcher.GlobWatcher
 }
 
+// fileWatcher handles watching all of the files in the monorepo.
+// We currently ignore .git and top-level node_modules. We can revisit
+// if necessary.
 type fileWatcher struct {
 	*fsnotify.Watcher
 
@@ -34,6 +43,7 @@ type fileWatcher struct {
 	closed    bool
 }
 
+// _ignores is the set of paths we exempt from file-watching
 var _ignores = []string{".git", "node_modules"}
 
 func (fw *fileWatcher) watchRecursively(root fs.AbsolutePath) error {
@@ -75,6 +85,8 @@ func (fw *fileWatcher) onFileAdded(name string) error {
 	return nil
 }
 
+// watch is the main file-watching loop. Watching is not recursive,
+// so when new directories are added, they are manually recursively watched.
 func (fw *fileWatcher) watch() {
 outer:
 	for {
@@ -110,7 +122,7 @@ outer:
 	fw.clientsMu.Lock()
 	fw.closed = true
 	for _, client := range fw.clients {
-		client.OnFileWatchingClosed()
+		client.OnFileWatchClosed()
 	}
 	fw.clientsMu.Unlock()
 }
@@ -120,7 +132,7 @@ func (fw *fileWatcher) AddClient(client FileWatchClient) {
 	defer fw.clientsMu.Unlock()
 	fw.clients = append(fw.clients, client)
 	if fw.closed {
-		client.OnFileWatchingClosed()
+		client.OnFileWatchClosed()
 	}
 }
 
@@ -131,9 +143,10 @@ func (fw *fileWatcher) AddClient(client FileWatchClient) {
 type FileWatchClient interface {
 	OnFileWatchEvent(ev fsnotify.Event)
 	OnFileWatchError(err error)
-	OnFileWatchingClosed()
+	OnFileWatchClosed()
 }
 
+// New returns a new instance of Server
 func New(logger hclog.Logger, repoRoot fs.AbsolutePath) (*Server, error) {
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
@@ -156,18 +169,17 @@ func New(logger hclog.Logger, repoRoot fs.AbsolutePath) (*Server, error) {
 	return server, nil
 }
 
+// Close is used for shutting down this copy of the server
 func (s *Server) Close() error {
 	return s.watcher.Close()
 }
 
+// Register registers this server to respond to GRPC requests
 func (s *Server) Register(registrar grpc.ServiceRegistrar) {
 	RegisterTurboServer(registrar, s)
 }
 
-func (s *Server) Ping(ctx context.Context, req *PingRequest) (*PingReply, error) {
-	return &PingReply{}, nil
-}
-
+// NotifyOutputsWritten implements the NotifyOutputsWritten rpc from turbo.proto
 func (s *Server) NotifyOutputsWritten(ctx context.Context, req *NotifyOutputsWrittenRequest) (*NotifyOutputsWrittenResponse, error) {
 	err := s.globWatcher.WatchGlobs(req.Hash, req.OutputGlobs)
 	if err != nil {
@@ -176,6 +188,7 @@ func (s *Server) NotifyOutputsWritten(ctx context.Context, req *NotifyOutputsWri
 	return &NotifyOutputsWrittenResponse{}, nil
 }
 
+// GetChangedOutputs implements the GetChangedOutputs rpc from turbo.proto
 func (s *Server) GetChangedOutputs(ctx context.Context, req *GetChangedOutputsRequest) (*GetChangedOutputsResponse, error) {
 	changedGlobs, err := s.globWatcher.GetChangedGlobs(req.Hash, req.OutputGlobs)
 	if err != nil {

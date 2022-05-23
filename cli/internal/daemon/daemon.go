@@ -202,18 +202,22 @@ func (d *daemon) timeoutLoop() {
 	}
 }
 
+// ClientOpts holds configuration options for interacting with the daemon
 type ClientOpts struct{}
 
+// Client represents a connection to the daemon process
 type Client struct {
 	server.TurboClient
 	conn *grpc.ClientConn
 }
 
+// Close closes the connection to the daemon process
 func (c *Client) Close() error {
 	return c.conn.Close()
 }
 
-func RunClient(repoRoot fs.AbsolutePath, logger hclog.Logger, opts ClientOpts) (*Client, error) {
+// GetClient returns a client that can be used to interact with the daemon
+func GetClient(repoRoot fs.AbsolutePath, logger hclog.Logger, opts ClientOpts) (*Client, error) {
 	creds := insecure.NewCredentials()
 
 	sockPath, err := getOrStartServer(repoRoot, logger, opts)

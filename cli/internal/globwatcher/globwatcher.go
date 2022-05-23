@@ -5,18 +5,19 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/bmatcuk/doublestar/v4"
 	"github.com/fsnotify/fsnotify"
 	"github.com/hashicorp/go-hclog"
+	"github.com/vercel/turborepo/cli/internal/doublestar"
 	"github.com/vercel/turborepo/cli/internal/fs"
 	"github.com/vercel/turborepo/cli/internal/util"
 )
 
-var (
-	// ErrClosed is returned when attempting to get changed globs after glob watching has closed
-	ErrClosed = errors.New("glob watching is closed")
-)
+// ErrClosed is returned when attempting to get changed globs after glob watching has closed
+var ErrClosed = errors.New("glob watching is closed")
 
+// GlobWatcher is used to track unchanged globs by hash. Once a glob registers a file change
+// it is no longer tracked until a new hash requests it. Once all globs for a particular hash
+// have changed, that hash is no longer tracked.
 type GlobWatcher struct {
 	logger   hclog.Logger
 	repoRoot fs.AbsolutePath
@@ -28,6 +29,7 @@ type GlobWatcher struct {
 	closed bool
 }
 
+// New returns a new GlobWatcher instance
 func New(logger hclog.Logger, repoRoot fs.AbsolutePath) *GlobWatcher {
 	return &GlobWatcher{
 		logger:     logger,
@@ -49,6 +51,9 @@ func (g *GlobWatcher) isClosed() bool {
 	return g.closed
 }
 
+// WatchGlobs registers the given set of globs to be watched for changes and grouped
+// under the given hash. This method pairs with GetChangedGlobs to determine which globs
+// out of a set of candidates have changed since WatchGlobs was called for the same hash.
 func (g *GlobWatcher) WatchGlobs(hash string, globs []string) error {
 	if g.isClosed() {
 		return ErrClosed
@@ -67,9 +72,12 @@ func (g *GlobWatcher) WatchGlobs(hash string, globs []string) error {
 	return nil
 }
 
+// GetChangedGlobs returns the subset of the given candidates that we are not currently
+// tracking as "unchanged".
 func (g *GlobWatcher) GetChangedGlobs(hash string, candidates []string) ([]string, error) {
 	if g.isClosed() {
-		return nil, ErrClosed
+		// If filewatching has crashed, return all candidates as changed.
+		return candidates, nil
 	}
 	// hashGlobs tracks all of the unchanged globs for a given hash
 	// If hashGlobs doesn't have our hash, either everything has changed,
@@ -86,6 +94,10 @@ func (g *GlobWatcher) GetChangedGlobs(hash string, candidates []string) ([]strin
 	return diff.UnsafeListOfStrings(), nil
 }
 
+// OnFileWatchEvent implements FileWatchClient.OnFileWatchEvent
+// On a file change, check if we have a glob that matches this file. Invalidate
+// any matching globs, and remove them from the set of unchanged globs for the correspondin
+// hashes. If this is the last glob for a hash, remove the hash from being tracked.
 func (g *GlobWatcher) OnFileWatchEvent(ev fsnotify.Event) {
 	// At this point, we don't care what the Op is, any Op represents a change
 	// that should invalidate matching globs
@@ -126,12 +138,13 @@ func (g *GlobWatcher) OnFileWatchEvent(ev fsnotify.Event) {
 	}
 }
 
+// OnFileWatchError implements FileWatchClient.OnFileWatchError
 func (g *GlobWatcher) OnFileWatchError(err error) {
 	g.logger.Error(fmt.Sprintf("file watching received an error: %v", err))
 }
 
-// OnFileWatchingClosed implements FileWatchClient.OnFileWatchingClosed
-func (g *GlobWatcher) OnFileWatchingClosed() {
+// OnFileWatchClosed implements FileWatchClient.OnFileWatchClosed
+func (g *GlobWatcher) OnFileWatchClosed() {
 	g.setClosed()
 	g.logger.Warn("GlobWatching is closing due to file watching closing")
 }

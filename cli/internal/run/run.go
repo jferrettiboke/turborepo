@@ -172,7 +172,7 @@ func (c *RunCommand) Run(args []string) int {
 		c.logError(c.Config.Logger, "", err)
 		return 1
 	}
-	turbodClient, err := daemon.RunClient(c.Config.Cwd, c.Config.Logger, daemon.ClientOpts{})
+	turbodClient, err := daemon.GetClient(c.Config.Cwd, c.Config.Logger, daemon.ClientOpts{})
 	if err != nil {
 		c.logWarning(c.Config.Logger, "", errors.Wrap(err, "failed to contact turbod. Continuing in standalone mode"))
 	} else {
