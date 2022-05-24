@@ -22,6 +22,8 @@ const _ = grpc.SupportPackageIsVersion7
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type TurboClient interface {
+	Hello(ctx context.Context, in *HelloRequest, opts ...grpc.CallOption) (*HelloResponse, error)
+	Shutdown(ctx context.Context, in *ShutdownRequest, opts ...grpc.CallOption) (*ShutdownResponse, error)
 	// Implement cache watching
 	NotifyOutputsWritten(ctx context.Context, in *NotifyOutputsWrittenRequest, opts ...grpc.CallOption) (*NotifyOutputsWrittenResponse, error)
 	GetChangedOutputs(ctx context.Context, in *GetChangedOutputsRequest, opts ...grpc.CallOption) (*GetChangedOutputsResponse, error)
@@ -33,6 +35,24 @@ type turboClient struct {
 
 func NewTurboClient(cc grpc.ClientConnInterface) TurboClient {
 	return &turboClient{cc}
+}
+
+func (c *turboClient) Hello(ctx context.Context, in *HelloRequest, opts ...grpc.CallOption) (*HelloResponse, error) {
+	out := new(HelloResponse)
+	err := c.cc.Invoke(ctx, "/server.Turbo/Hello", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *turboClient) Shutdown(ctx context.Context, in *ShutdownRequest, opts ...grpc.CallOption) (*ShutdownResponse, error) {
+	out := new(ShutdownResponse)
+	err := c.cc.Invoke(ctx, "/server.Turbo/Shutdown", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func (c *turboClient) NotifyOutputsWritten(ctx context.Context, in *NotifyOutputsWrittenRequest, opts ...grpc.CallOption) (*NotifyOutputsWrittenResponse, error) {
@@ -57,6 +77,8 @@ func (c *turboClient) GetChangedOutputs(ctx context.Context, in *GetChangedOutpu
 // All implementations must embed UnimplementedTurboServer
 // for forward compatibility
 type TurboServer interface {
+	Hello(context.Context, *HelloRequest) (*HelloResponse, error)
+	Shutdown(context.Context, *ShutdownRequest) (*ShutdownResponse, error)
 	// Implement cache watching
 	NotifyOutputsWritten(context.Context, *NotifyOutputsWrittenRequest) (*NotifyOutputsWrittenResponse, error)
 	GetChangedOutputs(context.Context, *GetChangedOutputsRequest) (*GetChangedOutputsResponse, error)
@@ -67,6 +89,12 @@ type TurboServer interface {
 type UnimplementedTurboServer struct {
 }
 
+func (UnimplementedTurboServer) Hello(context.Context, *HelloRequest) (*HelloResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method Hello not implemented")
+}
+func (UnimplementedTurboServer) Shutdown(context.Context, *ShutdownRequest) (*ShutdownResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method Shutdown not implemented")
+}
 func (UnimplementedTurboServer) NotifyOutputsWritten(context.Context, *NotifyOutputsWrittenRequest) (*NotifyOutputsWrittenResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method NotifyOutputsWritten not implemented")
 }
@@ -84,6 +112,42 @@ type UnsafeTurboServer interface {
 
 func RegisterTurboServer(s grpc.ServiceRegistrar, srv TurboServer) {
 	s.RegisterService(&Turbo_ServiceDesc, srv)
+}
+
+func _Turbo_Hello_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(HelloRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TurboServer).Hello(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/server.Turbo/Hello",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TurboServer).Hello(ctx, req.(*HelloRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Turbo_Shutdown_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ShutdownRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TurboServer).Shutdown(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/server.Turbo/Shutdown",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TurboServer).Shutdown(ctx, req.(*ShutdownRequest))
+	}
+	return interceptor(ctx, in, info, handler)
 }
 
 func _Turbo_NotifyOutputsWritten_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
@@ -129,6 +193,14 @@ var Turbo_ServiceDesc = grpc.ServiceDesc{
 	ServiceName: "server.Turbo",
 	HandlerType: (*TurboServer)(nil),
 	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "Hello",
+			Handler:    _Turbo_Hello_Handler,
+		},
+		{
+			MethodName: "Shutdown",
+			Handler:    _Turbo_Shutdown_Handler,
+		},
 		{
 			MethodName: "NotifyOutputsWritten",
 			Handler:    _Turbo_NotifyOutputsWritten_Handler,

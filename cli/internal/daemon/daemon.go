@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"os/exec"
 	"time"
 
 	"github.com/fatih/color"
@@ -16,12 +15,12 @@ import (
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 	"github.com/vercel/turborepo/cli/internal/config"
+	"github.com/vercel/turborepo/cli/internal/daemon/connector"
 	"github.com/vercel/turborepo/cli/internal/fs"
 	"github.com/vercel/turborepo/cli/internal/server"
 	"github.com/vercel/turborepo/cli/internal/ui"
 	"github.com/vercel/turborepo/cli/internal/util"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
 )
 
 type Command struct {
@@ -76,6 +75,11 @@ func getDaemonFileRoot(repoRoot fs.AbsolutePath) fs.AbsolutePath {
 func getUnixSocket(repoRoot fs.AbsolutePath) fs.AbsolutePath {
 	root := getDaemonFileRoot(repoRoot)
 	return root.Join("turbod.sock")
+}
+
+func getPidFile(repoRoot fs.AbsolutePath) fs.AbsolutePath {
+	root := getDaemonFileRoot(repoRoot)
+	return root.Join("turbod.pid")
 }
 
 // logError logs an error and outputs it to the UI.
@@ -202,62 +206,32 @@ func (d *daemon) timeoutLoop() {
 	}
 }
 
-// ClientOpts holds configuration options for interacting with the daemon
-type ClientOpts struct{}
+// ClientOpts re-exports connector.Ops to encapsulate the connector package
+type ClientOpts = connector.Opts
 
-// Client represents a connection to the daemon process
-type Client struct {
-	server.TurboClient
-	conn *grpc.ClientConn
-}
-
-// Close closes the connection to the daemon process
-func (c *Client) Close() error {
-	return c.conn.Close()
-}
+// Client re-exports connector.Client to encapsulate the connector package
+type Client = connector.Client
 
 // GetClient returns a client that can be used to interact with the daemon
-func GetClient(repoRoot fs.AbsolutePath, logger hclog.Logger, opts ClientOpts) (*Client, error) {
-	creds := insecure.NewCredentials()
-
-	sockPath, err := getOrStartServer(repoRoot, logger, opts)
-	if err != nil {
-		return nil, err
-	}
-	addr := fmt.Sprintf("unix://%v", sockPath.ToString())
-	conn, err := grpc.Dial(addr, grpc.WithTransportCredentials(creds))
-	if err != nil {
-		return nil, err
-	}
-	c := server.NewTurboClient(conn)
-	return &Client{
-		TurboClient: c,
-		conn:        conn,
-	}, nil
-}
-
-// getOrStartServer looks for an existing socket file, and starts a server if it can't find one
-func getOrStartServer(repoRoot fs.AbsolutePath, logger hclog.Logger, opts ClientOpts) (fs.AbsolutePath, error) {
+func GetClient(ctx context.Context, repoRoot fs.AbsolutePath, logger hclog.Logger, turboVersion string, opts ClientOpts) (Client, error) {
 	sockPath := getUnixSocket(repoRoot)
-	if sockPath.FileExists() {
-		logger.Debug(fmt.Sprintf("found existing turbod socket at %v", sockPath))
-		return sockPath, nil
-	}
+	pidPath := getPidFile(repoRoot)
 	bin, err := os.Executable()
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	logger.Debug(fmt.Sprintf("starting turbod binary %v", bin))
-	cmd := exec.Command(bin, "daemon", "--idle-time=15s")
-	err = cmd.Start()
+	c := &connector.Connector{
+		Logger:       logger.Named("TurbodClient"),
+		Bin:          bin,
+		Opts:         opts,
+		SockPath:     sockPath,
+		PidPath:      pidPath,
+		Ctx:          ctx,
+		TurboVersion: turboVersion,
+	}
+	client, err := c.Connect()
 	if err != nil {
-		return "", err
+		return nil, errors.Wrap(err, "failed to connect to turbo daemon. If necessary, run with --no-daemon")
 	}
-	for i := 0; i < 150; i++ {
-		<-time.After(20 * time.Millisecond)
-		if sockPath.FileExists() {
-			return sockPath, nil
-		}
-	}
-	return "", errors.New("timed out waiting for turbod to start")
+	return client, nil
 }

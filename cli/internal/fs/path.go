@@ -110,6 +110,11 @@ func (ap AbsolutePath) RelativePathString(path string) (string, error) {
 	return filepath.Rel(ap.asString(), path)
 }
 
+// Remove implements os.Remove for an absolute path.
+func (ap AbsolutePath) Remove() error {
+	return os.Remove(ap.asString())
+}
+
 // EnsureDirFS ensures that the directory containing the given filename is created
 func EnsureDirFS(fs afero.Fs, filename AbsolutePath) error {
 	dir := filename.Dir()
