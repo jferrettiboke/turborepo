@@ -52,14 +52,15 @@ func (c *Command) Synopsis() string {
 }
 
 type daemon struct {
-	ui         cli.Ui
-	logger     hclog.Logger
-	repoRoot   fs.AbsolutePath
-	timeout    time.Duration
-	reqCh      chan struct{}
-	timedOutCh chan struct{}
-	ctx        context.Context
-	cancel     context.CancelFunc
+	ui           cli.Ui
+	logger       hclog.Logger
+	repoRoot     fs.AbsolutePath
+	timeout      time.Duration
+	reqCh        chan struct{}
+	timedOutCh   chan struct{}
+	ctx          context.Context
+	cancel       context.CancelFunc
+	turboVersion string
 }
 
 func getDaemonFileRoot(repoRoot fs.AbsolutePath) fs.AbsolutePath {
@@ -105,12 +106,13 @@ func getCmd(config *config.Config, ui cli.Ui) *cobra.Command {
 					Color:  hclog.AutoColor,
 					Name:   "turbod",
 				}),
-				repoRoot:   config.Cwd,
-				timeout:    idleTimeout,
-				reqCh:      make(chan struct{}),
-				timedOutCh: make(chan struct{}),
-				ctx:        ctx,
-				cancel:     cancel,
+				repoRoot:     config.Cwd,
+				timeout:      idleTimeout,
+				reqCh:        make(chan struct{}),
+				timedOutCh:   make(chan struct{}),
+				ctx:          ctx,
+				cancel:       cancel,
+				turboVersion: config.TurboVersion,
 			}
 			err := d.runTurboServer()
 			if err != nil {
@@ -149,7 +151,7 @@ func (d *daemon) runTurboServer() error {
 	if err != nil {
 		return err
 	}
-	turboServer, err := server.New(d.logger, d.repoRoot)
+	turboServer, err := server.New(d.logger, d.repoRoot, d.turboVersion)
 	if err != nil {
 		return err
 	}
@@ -193,15 +195,16 @@ func (d *daemon) onRequest(ctx context.Context, req interface{}, info *grpc.Unar
 
 func (d *daemon) timeoutLoop() {
 	timeoutCh := time.After(d.timeout)
+outer:
 	for {
 		select {
 		case <-d.reqCh:
 			timeoutCh = time.After(d.timeout)
 		case <-timeoutCh:
 			close(d.timedOutCh)
-			break
+			break outer
 		case <-d.ctx.Done():
-			break
+			break outer
 		}
 	}
 }

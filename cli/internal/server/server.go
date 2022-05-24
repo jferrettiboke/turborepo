@@ -2,6 +2,8 @@ package server
 
 import (
 	"context"
+	"fmt"
+	sync "sync"
 
 	"github.com/fsnotify/fsnotify"
 	"github.com/hashicorp/go-hclog"
@@ -10,6 +12,8 @@ import (
 	"github.com/vercel/turborepo/cli/internal/fs"
 	"github.com/vercel/turborepo/cli/internal/globwatcher"
 	"google.golang.org/grpc"
+	codes "google.golang.org/grpc/codes"
+	status "google.golang.org/grpc/status"
 )
 
 // Server implements the GRPC serverside of TurboServer
@@ -20,12 +24,27 @@ import (
 // changes in the underlying configuration.
 type Server struct {
 	UnimplementedTurboServer
-	watcher     *filewatcher.FileWatcher
-	globWatcher *globwatcher.GlobWatcher
+	watcher      *filewatcher.FileWatcher
+	globWatcher  *globwatcher.GlobWatcher
+	turboVersion string
+	closer       *closer
+}
+
+type closer struct {
+	grpcServer *grpc.Server
+	once       sync.Once
+}
+
+func (c *closer) close() {
+	c.once.Do(func() {
+		go func() {
+			c.grpcServer.GracefulStop()
+		}()
+	})
 }
 
 // New returns a new instance of Server
-func New(logger hclog.Logger, repoRoot fs.AbsolutePath) (*Server, error) {
+func New(logger hclog.Logger, repoRoot fs.AbsolutePath, turboVersion string) (*Server, error) {
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
 		return nil, err
@@ -49,8 +68,11 @@ func (s *Server) Close() error {
 }
 
 // Register registers this server to respond to GRPC requests
-func (s *Server) Register(registrar grpc.ServiceRegistrar) {
-	RegisterTurboServer(registrar, s)
+func (s *Server) Register(grpcServer *grpc.Server) {
+	s.closer = &closer{
+		grpcServer: grpcServer,
+	}
+	RegisterTurboServer(grpcServer, s)
 }
 
 // NotifyOutputsWritten implements the NotifyOutputsWritten rpc from turbo.proto
@@ -71,4 +93,20 @@ func (s *Server) GetChangedOutputs(ctx context.Context, req *GetChangedOutputsRe
 	return &GetChangedOutputsResponse{
 		ChangedOutputGlobs: changedGlobs,
 	}, nil
+}
+
+// Hello implements the Hello rpc from turbo.proto
+func (s *Server) Hello(ctx context.Context, req *HelloRequest) (*HelloResponse, error) {
+	clientVersion := req.Version
+	if clientVersion != s.turboVersion {
+		st := status.New(codes.FailedPrecondition, fmt.Sprintf("version mismatch. Client %v Server %v", clientVersion, s.turboVersion))
+		return nil, st.Err()
+	}
+	return &HelloResponse{}, nil
+}
+
+func (s *Server) Shutdown(ctx context.Context, req *ShutdownRequest) (*ShutdownResponse, error) {
+	if s.closer != nil {
+
+	}
 }
