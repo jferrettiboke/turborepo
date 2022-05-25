@@ -199,6 +199,13 @@ func (d *daemon) runTurboServer(rpcServer rpcServer) error {
 	case <-d.ctx.Done():
 		s.GracefulStop()
 	}
+	// Wait for the server to exit, if it hasn't already.
+	// When it does, this channel will close. We don't
+	// care about the error in this scenario because we've
+	// either requested a close via cancelling the context
+	// or an inactivity timeout.
+	for range errCh {
+	}
 	if err := lockFile.Unlock(); err != nil {
 		d.logError(errors.Wrapf(err, "failed unlocking pid file at %v", pidPath))
 	}
