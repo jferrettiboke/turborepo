@@ -3,6 +3,7 @@ package globwatcher
 import (
 	"errors"
 	"fmt"
+	"path/filepath"
 	"sync"
 
 	"github.com/fsnotify/fsnotify"
@@ -111,7 +112,7 @@ func (g *GlobWatcher) OnFileWatchEvent(ev fsnotify.Event) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	for glob, hashStatus := range g.globStatus {
-		matches, err := doublestar.Match(glob, repoRelativePath)
+		matches, err := doublestar.Match(glob, filepath.ToSlash(repoRelativePath))
 		if err != nil {
 			g.logger.Error(fmt.Sprintf("failed to check path %v against glob %v: %v", repoRelativePath, glob, err))
 			continue

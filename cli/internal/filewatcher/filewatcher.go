@@ -48,7 +48,7 @@ type FileWatcher struct {
 func New(logger hclog.Logger, repoRoot fs.AbsolutePath, watcher *fsnotify.Watcher) *FileWatcher {
 	excludes := make([]string, len(_ignores))
 	for i, ignore := range _ignores {
-		excludes[i] = filepath.FromSlash(repoRoot.Join(ignore).ToString() + "/**")
+		excludes[i] = filepath.ToSlash(repoRoot.Join(ignore).ToString() + "/**")
 	}
 	excludePattern := "{" + strings.Join(excludes, ",") + "}"
 	return &FileWatcher{
@@ -109,7 +109,6 @@ func (fw *FileWatcher) watchRecursively(root fs.AbsolutePath) error {
 // watch it.
 func (fw *FileWatcher) onFileAdded(name string) error {
 	info, err := os.Lstat(name)
-	fw.logger.Info(fmt.Sprintf("added %v isDir: %v", name, info.IsDir()))
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			// We can race with a file being added and removed. Ignore it

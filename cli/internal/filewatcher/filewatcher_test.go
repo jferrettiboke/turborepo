@@ -1,6 +1,7 @@
 package filewatcher
 
 import (
+	"runtime"
 	"sync"
 	"testing"
 	"time"
@@ -137,7 +138,10 @@ func TestFileWatching(t *testing.T) {
 	got := c.createEvents[len(c.createEvents)-1]
 	c.mu.Unlock()
 	assert.DeepEqual(t, got, expectedEvent)
-	expectedWatching = append(expectedWatching, fooPath.ToString())
+	// Windows doesn't watch individual files, only directories
+	if runtime.GOOS != "windows" {
+		expectedWatching = append(expectedWatching, fooPath.ToString())
+	}
 	watching = fw.WatchList()
 	assertSameSet(t, watching, expectedWatching)
 
@@ -160,5 +164,4 @@ func TestFileWatching(t *testing.T) {
 	// No change in watchlist
 	watching = fw.WatchList()
 	assertSameSet(t, watching, expectedWatching)
-
 }
