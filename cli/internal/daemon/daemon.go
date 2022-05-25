@@ -12,6 +12,7 @@ import (
 	"github.com/fatih/color"
 	"github.com/hashicorp/go-hclog"
 	"github.com/mitchellh/cli"
+	"github.com/nightlyone/lockfile"
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 	"github.com/vercel/turborepo/cli/internal/config"
@@ -52,15 +53,14 @@ func (c *Command) Synopsis() string {
 }
 
 type daemon struct {
-	ui           cli.Ui
-	logger       hclog.Logger
-	repoRoot     fs.AbsolutePath
-	timeout      time.Duration
-	reqCh        chan struct{}
-	timedOutCh   chan struct{}
-	ctx          context.Context
-	cancel       context.CancelFunc
-	turboVersion string
+	ui         cli.Ui
+	logger     hclog.Logger
+	repoRoot   fs.AbsolutePath
+	timeout    time.Duration
+	reqCh      chan struct{}
+	timedOutCh chan struct{}
+	ctx        context.Context
+	cancel     context.CancelFunc
 }
 
 func getDaemonFileRoot(repoRoot fs.AbsolutePath) fs.AbsolutePath {
@@ -98,27 +98,34 @@ func getCmd(config *config.Config, ui cli.Ui) *cobra.Command {
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx, cancel := context.WithCancel(context.Background())
+			logger := hclog.New(&hclog.LoggerOptions{
+				Output: os.Stdout,
+				Level:  hclog.Debug,
+				Color:  hclog.AutoColor,
+				Name:   "turbod",
+			})
 			d := &daemon{
-				ui: ui,
-				logger: hclog.New(&hclog.LoggerOptions{
-					Output: os.Stdout,
-					Level:  hclog.Debug,
-					Color:  hclog.AutoColor,
-					Name:   "turbod",
-				}),
-				repoRoot:     config.Cwd,
-				timeout:      idleTimeout,
-				reqCh:        make(chan struct{}),
-				timedOutCh:   make(chan struct{}),
-				ctx:          ctx,
-				cancel:       cancel,
-				turboVersion: config.TurboVersion,
+				ui:         ui,
+				logger:     logger,
+				repoRoot:   config.Cwd,
+				timeout:    idleTimeout,
+				reqCh:      make(chan struct{}),
+				timedOutCh: make(chan struct{}),
+				ctx:        ctx,
+				cancel:     cancel,
 			}
-			err := d.runTurboServer()
+			turboServer, err := server.New(d.logger.Named("rpc server"), config.Cwd, config.TurboVersion)
 			if err != nil {
 				d.logError(err)
+				return err
 			}
-			return err
+			defer func() { _ = turboServer.Close() }()
+			err = d.runTurboServer(turboServer)
+			if err != nil {
+				d.logError(err)
+				return err
+			}
+			return nil
 		},
 	}
 	cmd.Flags().DurationVar(&idleTimeout, "idle-time", 2*time.Hour, "Set the idle timeout for turbod")
@@ -130,32 +137,38 @@ var (
 	errInactivityTimeout = errors.New("turbod shut down from inactivity")
 )
 
-func (d *daemon) debounceServers(sockPath fs.AbsolutePath) error {
-	if !sockPath.FileExists() {
-		return nil
+func (d *daemon) debounceServers(sockPath fs.AbsolutePath, pidPath fs.AbsolutePath) (lockfile.Lockfile, error) {
+	if sockPath.FileExists() {
+		return "", errors.Wrapf(errAlreadyRunning, "socket file already exists at %v", sockPath)
 	}
-	// The socket file exists, can we connect to it?
-	return errors.Wrapf(errAlreadyRunning, "socket file already exists at %v", sockPath)
+	lockFile, err := lockfile.New(pidPath.ToString())
+	if err != nil {
+		return "", err
+	}
+	if err := lockFile.TryLock(); err != nil {
+		return "", err
+	}
+	return lockFile, nil
+
 }
 
-func (d *daemon) runTurboServer() error {
+type rpcServer interface {
+	Register(grpcServer *grpc.Server)
+}
+
+func (d *daemon) runTurboServer(rpcServer rpcServer) error {
 	defer d.cancel()
 
 	sockPath := getUnixSocket(d.repoRoot)
+	pidPath := getPidFile(d.repoRoot)
+	if err := sockPath.EnsureDir(); err != nil {
+		return err
+	}
 	d.logger.Debug(fmt.Sprintf("Using socket path %v (%v)\n", sockPath, len(sockPath)))
-	err := d.debounceServers(sockPath)
+	lockFile, err := d.debounceServers(sockPath, pidPath)
 	if err != nil {
 		return err
 	}
-	err = sockPath.EnsureDir()
-	if err != nil {
-		return err
-	}
-	turboServer, err := server.New(d.logger, d.repoRoot, d.turboVersion)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = turboServer.Close() }()
 	lis, err := net.Listen("unix", sockPath.ToString())
 	if err != nil {
 		return err
@@ -164,7 +177,7 @@ func (d *daemon) runTurboServer() error {
 	s := grpc.NewServer(grpc.UnaryInterceptor(d.onRequest))
 	go d.timeoutLoop()
 
-	turboServer.Register(s)
+	rpcServer.Register(s)
 	errCh := make(chan error)
 	go func(errCh chan<- error) {
 		if err := s.Serve(lis); err != nil {
@@ -175,15 +188,18 @@ func (d *daemon) runTurboServer() error {
 	var exitErr error
 	select {
 	case err, ok := <-errCh:
-		{
-			if ok {
-				exitErr = err
-			}
-			d.cancel()
+		if ok {
+			exitErr = err
 		}
+		d.cancel()
 	case <-d.timedOutCh:
 		exitErr = errInactivityTimeout
-		s.Stop()
+		s.GracefulStop()
+	case <-d.ctx.Done():
+		s.GracefulStop()
+	}
+	if err := lockFile.Unlock(); err != nil {
+		d.logError(errors.Wrapf(err, "failed unlocking pid file at %v", pidPath))
 	}
 	return exitErr
 }

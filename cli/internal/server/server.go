@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"fmt"
 	sync "sync"
 
 	"github.com/fsnotify/fsnotify"
@@ -99,14 +98,18 @@ func (s *Server) GetChangedOutputs(ctx context.Context, req *GetChangedOutputsRe
 func (s *Server) Hello(ctx context.Context, req *HelloRequest) (*HelloResponse, error) {
 	clientVersion := req.Version
 	if clientVersion != s.turboVersion {
-		st := status.New(codes.FailedPrecondition, fmt.Sprintf("version mismatch. Client %v Server %v", clientVersion, s.turboVersion))
-		return nil, st.Err()
+		err := status.Errorf(codes.FailedPrecondition, "version mismatch. Client %v Server %v", clientVersion, s.turboVersion)
+		return nil, err
 	}
 	return &HelloResponse{}, nil
 }
 
+// Shutdown implements the Shutdown rpc from turbo.proto
 func (s *Server) Shutdown(ctx context.Context, req *ShutdownRequest) (*ShutdownResponse, error) {
 	if s.closer != nil {
-
+		s.closer.close()
+		return &ShutdownResponse{}, nil
 	}
+	err := status.Error(codes.NotFound, "shutdown mechanism not found")
+	return nil, err
 }

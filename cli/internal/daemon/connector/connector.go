@@ -74,7 +74,7 @@ func (c *Connector) killLiveServer(client *clientAndConn) error {
 
 	_, err := client.Shutdown(c.Ctx, &server.ShutdownRequest{})
 	if err != nil {
-		c.Logger.Error(fmt.Sprintf("failed to shutdown running daemon. attempting to force it closed"))
+		c.Logger.Error(fmt.Sprintf("failed to shutdown running daemon. attempting to force it closed: %v", err))
 		return c.killDeadServer()
 	}
 	// Wait for the server to gracefully exit
