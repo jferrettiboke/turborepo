@@ -24,6 +24,7 @@ import (
 	"google.golang.org/grpc"
 )
 
+// Command is the wrapper around the daemon command until we port fully to cobra
 type Command struct {
 	Config *config.Config
 	UI     cli.Ui

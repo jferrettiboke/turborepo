@@ -3,7 +3,6 @@ package connector
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net"
 	"os/exec"
 	"runtime"
@@ -15,6 +14,7 @@ import (
 	"github.com/vercel/turborepo/cli/internal/server"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
 	"google.golang.org/grpc/test/bufconn"
 	"gotest.tools/v3/assert"
@@ -29,11 +29,11 @@ func testBin() string {
 }
 
 func getUnixSocket(dir turbofs.AbsolutePath) turbofs.AbsolutePath {
-	return dir.Join(fmt.Sprintf("turbod-test.sock"))
+	return dir.Join("turbod-test.sock")
 }
 
 func getPidFile(dir turbofs.AbsolutePath) turbofs.AbsolutePath {
-	return dir.Join(fmt.Sprintf("turbod-test.pid"))
+	return dir.Join("turbod-test.pid")
 }
 
 func TestConnectAndHello_ConnectFails(t *testing.T) {
@@ -65,7 +65,7 @@ func TestConnectAndHello_ConnectFails(t *testing.T) {
 	assert.NilError(t, err, "connect")
 	defer func() { _ = conn.Close() }()
 	err = c.sendHello(conn)
-	assert.ErrorIs(t, err, ErrConnectionFailure)
+	assert.ErrorIs(t, err, errConnectionFailure)
 }
 
 func TestKillDeadServerNoPid(t *testing.T) {
@@ -251,7 +251,7 @@ func TestKillLiveServer(t *testing.T) {
 
 	conn, err := grpc.DialContext(ctx, "bufnet", grpc.WithContextDialer(func(ctx context.Context, s string) (net.Conn, error) {
 		return lis.Dial()
-	}), grpc.WithInsecure())
+	}), grpc.WithTransportCredentials(insecure.NewCredentials()))
 	assert.NilError(t, err, "DialContext")
 	turboClient := server.NewTurboClient(conn)
 	client := &clientAndConn{
@@ -259,8 +259,8 @@ func TestKillLiveServer(t *testing.T) {
 		ClientConn:  conn,
 	}
 	err = c.sendHello(client)
-	if !errors.Is(err, ErrVersionMismatch) {
-		t.Errorf("sendHello error got %v, want %v", err, ErrVersionMismatch)
+	if !errors.Is(err, errVersionMismatch) {
+		t.Errorf("sendHello error got %v, want %v", err, errVersionMismatch)
 	}
 	err = c.killLiveServer(client)
 	assert.NilError(t, err, "killLiveServer")

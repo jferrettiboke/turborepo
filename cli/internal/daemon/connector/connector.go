@@ -2,7 +2,6 @@ package connector
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -11,6 +10,7 @@ import (
 
 	"github.com/hashicorp/go-hclog"
 	"github.com/nightlyone/lockfile"
+	"github.com/pkg/errors"
 	"github.com/vercel/turborepo/cli/internal/fs"
 	"github.com/vercel/turborepo/cli/internal/server"
 	"google.golang.org/grpc"
@@ -20,12 +20,17 @@ import (
 )
 
 var (
+	// ErrFailedToStart is returned when the daemon process cannot be started
 	ErrFailedToStart     = errors.New("daemon could not be started")
-	ErrVersionMismatch   = errors.New("daemon version does not match client version")
-	ErrConnectionFailure = errors.New("could not connect to daemon")
-	ErrTooManyAttempts   = errors.New("reached maximum number of attempts contacting daemon")
+	errVersionMismatch   = errors.New("daemon version does not match client version")
+	errConnectionFailure = errors.New("could not connect to daemon")
+	// ErrTooManyAttempts is returned when the client fails to connect too many times
+	ErrTooManyAttempts = errors.New("reached maximum number of attempts contacting daemon")
 )
 
+// Opts is the set of configurable options for the client connection,
+// including some options to be passed through to the daemon process if
+// it needs to be started.
 type Opts struct {
 	ServerTimeout time.Duration
 }
@@ -41,6 +46,8 @@ type clientAndConn struct {
 	*grpc.ClientConn
 }
 
+// Connector instances are used to create a connection to turbo's daemon process
+// The daemon will be started , or killed and restarted, if necessary
 type Connector struct {
 	Logger       hclog.Logger
 	Bin          string
@@ -51,15 +58,26 @@ type Connector struct {
 	TurboVersion string
 }
 
+func (c *Connector) wrapConnectionError(err error) error {
+	return errors.Wrapf(err, `connection to turbo daemon process failed. Please ensure the following:
+ - the unix domain socket at %v has been removed
+ - the process identified by the pid at %v is not running, and remove %v
+ You can also run without the daemon process by passing --no-daemon`, c.SockPath, c.PidPath, c.PidPath)
+}
+
 func (c *Connector) addr() string {
 	return fmt.Sprintf("unix://%v", c.SockPath.ToString())
 }
 
-// If the socket exists, dial and call Hello
-//   If can't connect: (check pid?) (start new daemon?)
+// If the socket and pid file exist, dial and call Hello
+//   If can't connect:
+//     try to kill the process and restart it
 //   If there's a version mismatch, attempt to kill and restart
-//   If that times out, report an error and die. Error should show no-daemon flag
-//
+//   If that times out, report an error
+// If the socket and pid don't exist, try starting the deamon
+// After _maxAttempts, give up and return an err.
+// The error should contain enough diagnostic information to
+// investigate (pid file path, socket file path)
 const _maxAttempts = 3
 
 var (
@@ -127,7 +145,18 @@ func (c *Connector) killDeadServer() error {
 	return err
 }
 
+// Connect attempts to create a connection to a turbo daemon.
+// Retries and daemon restarts are built in. If this fails,
+// it is unlikely to succeed after an automated retry.
 func (c *Connector) Connect() (Client, error) {
+	client, err := c.connectInternal()
+	if err != nil {
+		return nil, c.wrapConnectionError(err)
+	}
+	return client, nil
+}
+
+func (c *Connector) connectInternal() (Client, error) {
 	if !c.SockPath.FileExists() {
 		if err := c.startDaemon(); err != nil {
 			return nil, err
@@ -142,12 +171,12 @@ func (c *Connector) Connect() (Client, error) {
 			return nil, err
 		}
 		err = c.sendHello(client)
-		if errors.Is(err, ErrVersionMismatch) {
+		if errors.Is(err, errVersionMismatch) {
 			if err := c.killLiveServer(client); err != nil {
 				return nil, err
 			}
 			attempts++
-		} else if errors.Is(err, ErrConnectionFailure) {
+		} else if errors.Is(err, errConnectionFailure) {
 			if err := c.killDeadServer(); err != nil {
 				return nil, err
 			}
@@ -182,9 +211,9 @@ func (c *Connector) sendHello(client server.TurboClient) error {
 	case codes.OK:
 		return nil
 	case codes.FailedPrecondition:
-		return ErrVersionMismatch
+		return errVersionMismatch
 	case codes.Unavailable:
-		return ErrConnectionFailure
+		return errConnectionFailure
 	default:
 		return err
 	}

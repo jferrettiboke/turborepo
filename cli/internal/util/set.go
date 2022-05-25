@@ -3,6 +3,7 @@ package util
 // Set is a set data structure.
 type Set map[interface{}]interface{}
 
+// SetFromStrings creates a Set containing the strings from the given slice
 func SetFromStrings(sl []string) Set {
 	set := make(Set, len(sl))
 	for _, item := range sl {

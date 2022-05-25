@@ -149,6 +149,8 @@ func RemoveFile(fs afero.Fs, filename AbsolutePath) error {
 	return fs.Remove(filename.asString())
 }
 
+// GetTempDir returns the absolute path of a directory with the given name
+// under the system's default temp directory location
 func GetTempDir(subDir string) AbsolutePath {
 	return AbsolutePath(os.TempDir()).Join(subDir)
 }
