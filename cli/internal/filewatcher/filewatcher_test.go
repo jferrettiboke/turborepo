@@ -19,6 +19,10 @@ type testClient struct {
 	notify chan<- struct{}
 }
 
+type helper interface {
+	Helper()
+}
+
 func (c *testClient) OnFileWatchEvent(ev fsnotify.Event) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -31,6 +35,12 @@ func (c *testClient) OnFileWatchError(err error) {}
 func (c *testClient) OnFileWatchClosed() {}
 
 func assertSameSet(t *testing.T, gotSlice []string, wantSlice []string) {
+	// mark this method as a helper, if we can
+	var tt interface{} = t
+	helper, ok := tt.(helper)
+	if ok {
+		helper.Helper()
+	}
 	got := util.SetFromStrings(gotSlice)
 	want := util.SetFromStrings(wantSlice)
 	extra := got.Difference(want)

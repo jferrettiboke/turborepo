@@ -134,7 +134,7 @@ outer:
 			if ev.Op&fsnotify.Create != 0 {
 				if err := fw.onFileAdded(ev.Name); err != nil {
 					fw.logger.Warn(fmt.Sprintf("failed to handle adding %v: %v", ev.Name, err))
-					continue
+					continue outer
 				}
 			}
 			fw.clientsMu.RLock()
