@@ -14,9 +14,9 @@ import (
 )
 
 type testClient struct {
-	mu     sync.Mutex
-	events []fsnotify.Event
-	notify chan<- struct{}
+	mu           sync.Mutex
+	createEvents []fsnotify.Event
+	notify       chan<- struct{}
 }
 
 type helper interface {
@@ -24,10 +24,12 @@ type helper interface {
 }
 
 func (c *testClient) OnFileWatchEvent(ev fsnotify.Event) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.events = append(c.events, ev)
-	c.notify <- struct{}{}
+	if ev.Op&fsnotify.Create != 0 {
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		c.createEvents = append(c.createEvents, ev)
+		c.notify <- struct{}{}
+	}
 }
 
 func (c *testClient) OnFileWatchError(err error) {}
@@ -35,7 +37,7 @@ func (c *testClient) OnFileWatchError(err error) {}
 func (c *testClient) OnFileWatchClosed() {}
 
 func assertSameSet(t *testing.T, gotSlice []string, wantSlice []string) {
-	// mark this method as a helper, if we can
+	// mark this method as a helper
 	var tt interface{} = t
 	helper, ok := tt.(helper)
 	if ok {
@@ -54,6 +56,8 @@ func assertSameSet(t *testing.T, gotSlice []string, wantSlice []string) {
 }
 
 func expectFilesystemEvent(t *testing.T, ch <-chan struct{}) {
+	// mark this method as a helper
+	t.Helper()
 	select {
 	case <-ch:
 		return
@@ -63,9 +67,15 @@ func expectFilesystemEvent(t *testing.T, ch <-chan struct{}) {
 }
 
 func expectNoFilesystemEvent(t *testing.T, ch <-chan struct{}) {
+	// mark this method as a helper
+	t.Helper()
 	select {
-	case ev := <-ch:
-		t.Errorf("got unexpected filesystem event %v", ev)
+	case ev, ok := <-ch:
+		if ok {
+			t.Errorf("got unexpected filesystem event %v", ev)
+		} else {
+			t.Error("filewatching closed unexpectedly")
+		}
 	case <-time.After(100 * time.Millisecond):
 		return
 	}
@@ -108,7 +118,7 @@ func TestFileWatching(t *testing.T) {
 	assertSameSet(t, watching, expectedWatching)
 
 	// Add a client
-	ch := make(chan struct{})
+	ch := make(chan struct{}, 1)
 	c := &testClient{
 		notify: ch,
 	}
@@ -124,7 +134,7 @@ func TestFileWatching(t *testing.T) {
 		Name: fooPath.ToString(),
 	}
 	c.mu.Lock()
-	got := c.events[len(c.events)-1]
+	got := c.createEvents[len(c.createEvents)-1]
 	c.mu.Unlock()
 	assert.DeepEqual(t, got, expectedEvent)
 	expectedWatching = append(expectedWatching, fooPath.ToString())

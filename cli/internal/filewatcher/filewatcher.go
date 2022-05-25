@@ -103,8 +103,13 @@ func (fw *FileWatcher) watchRecursively(root fs.AbsolutePath) error {
 	return nil
 }
 
+// onFileAdded helps up paper over cross-platform inconsistencies in fsnotify.
+// Some fsnotify backends automatically add the contents of directories. Some do
+// not. Adding a watch is idempotent, so anytime any file we care about gets added,
+// watch it.
 func (fw *FileWatcher) onFileAdded(name string) error {
 	info, err := os.Lstat(name)
+	fw.logger.Info(fmt.Sprintf("added %v isDir: %v", name, info.IsDir()))
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			// We can race with a file being added and removed. Ignore it
@@ -114,6 +119,10 @@ func (fw *FileWatcher) onFileAdded(name string) error {
 	}
 	if info.IsDir() {
 		if err := fw.watchRecursively(fs.AbsolutePath(name)); err != nil {
+			return err
+		}
+	} else {
+		if err := fw.Add(name); err != nil {
 			return err
 		}
 	}
